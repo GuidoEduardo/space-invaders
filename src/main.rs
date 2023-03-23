@@ -1,9 +1,9 @@
 use std::{
     error::Error,
-    io::{self, Stdout},
-    sync::mpsc::{self, channel},
+    io,
+    sync::mpsc,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use crossterm::{
@@ -15,6 +15,7 @@ use crossterm::{
 };
 use invaders::{
     frame::{self, Drawable},
+    invaders::InvadersGroup,
     player::Player,
     render,
 };
@@ -48,9 +49,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Game Loop
     let mut player = Player::new();
+    let mut instant = Instant::now();
+    let mut invaders = InvadersGroup::new();
 
     'gameloop: loop {
         // Per-frame init
+        let delta = instant.elapsed();
+        instant = Instant::now();
         let mut curr_frame = frame::new_frame();
 
         // Input
@@ -59,16 +64,32 @@ fn main() -> Result<(), Box<dyn Error>> {
                 match key_event.code {
                     KeyCode::Left | KeyCode::Char('a') => player.move_left(),
                     KeyCode::Right | KeyCode::Char('d') => player.move_right(),
+                    KeyCode::Char(' ') | KeyCode::Enter => player.shoot(),
                     KeyCode::Esc | KeyCode::Char('q') => break 'gameloop,
                     _ => {}
                 }
             }
         }
 
+        // Updates
+        player.update(delta);
+        invaders.update(delta);
+        player.detect_hits(&mut invaders);
+
         // Draw & Render
-        player.draw(&mut curr_frame);
+        let drawables: Vec<&dyn Drawable> = vec![&player, &invaders];
+
+        for drawable in drawables {
+            drawable.draw(&mut curr_frame);
+        }
+
         let _ = render_tx.send(curr_frame);
         thread::sleep(Duration::from_millis(1));
+
+        // End Game
+        if invaders.all_killed() | invaders.reached_bottom() {
+            break 'gameloop;
+        }
     }
 
     // Cleanup
